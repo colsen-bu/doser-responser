@@ -1,0 +1,24 @@
+version: '3.8'
+
+networks:
+  nginx-proxy:
+    external: true
+
+services:
+  doser-responser:
+    build: .
+    container_name: doser-responser
+    environment:
+      - FLASK_ENV=development
+    volumes:
+      # Mount source code for development
+      - ./dash_app:/app/dash_app
+    restart: unless-stopped
+    networks:
+      - nginx-proxy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7090/_dash-layout"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

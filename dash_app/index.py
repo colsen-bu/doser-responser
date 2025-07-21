@@ -358,8 +358,6 @@ def toggle_well_exclusion(n_clicks, excluded_wells):
     print("New excluded wells:", excluded_wells)
     return excluded_wells
 
-# Removed reset_excluded_wells callback since button is commented out
-
 # Add this callback to toggle the collapse state
 @callback(
     Output("collapse-parameters", "is_open"),
