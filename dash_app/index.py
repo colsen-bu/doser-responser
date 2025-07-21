@@ -3,7 +3,7 @@
 import dash
 from dash import html, dcc, Input, Output, State, callback, no_update, MATCH, ALL
 import dash_bootstrap_components as dbc
-from dash_app.app import app, server
+from app import app, server
 import pandas as pd
 import numpy as np
 import base64
@@ -13,6 +13,7 @@ import plotly.express as px
 from dash_bootstrap_templates import load_figure_template
 import json
 from scipy.optimize import curve_fit
+import re
 
 # Load the 'vapor' theme
 load_figure_template('vapor')
@@ -154,6 +155,15 @@ app.layout = dbc.Container([
                 }
             ),
             
+            # dbc.Button(
+            #     'Reset Excluded Wells',
+            #     id='reset-excluded-button',
+            #     color='secondary',
+            #     className='mt-2 mb-3',
+            #     size='sm',
+            #     style={'width': '100%'}
+            # ),
+            
             html.P('Click on wells to include/exclude them from the dose response analysis', 
                   style={'textAlign': 'center', 'marginBottom': '20px', 'fontStyle': 'italic'}),
             
@@ -166,33 +176,66 @@ app.layout = dbc.Container([
         dbc.Col([
             html.H1('Dose Response Analysis', style={'textAlign': 'center'}),
             
-            # Common controls section - visible for both tabs
-            html.Div([
-                html.Div([
-                    html.Label('Select Curve Model:'),
-                    dcc.Dropdown(
-                        id='model-dropdown',
-                        options=[
-                            {'label': '4-Parameter Logistic (Hill Equation)', 'value': 'hill'},
-                            {'label': '3-Parameter Logistic', 'value': '3pl'},
-                            {'label': '5-Parameter Logistic', 'value': '5pl'},
-                            {'label': 'Exponential', 'value': 'exp'},
-                        ],
-                        value='hill',
-                        clearable=False
+            # Add this new button row with controls
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button(
+                        "Hide Parameters", 
+                        id="collapse-button",
+                        className="mb-3",
+                        color="secondary",
+                        n_clicks=0,
                     ),
-                ], style={'margin': '10px 0 20px 0'}),
-                
-                # Parameter sliders and explanations - will be dynamically populated
+                ], width="auto"),
+            ], justify="end"),
+            
+            # Wrap the parameters section in a Collapse component
+            dbc.Collapse(
                 dbc.Row([
+                    # Model dropdown stays at the top
+                    html.Div([
+                        html.Label('Select Curve Model:'),
+                        dcc.Dropdown(
+                            id='model-dropdown',
+                            options=[
+                                {'label': '4-Parameter Logistic (Hill Equation)', 'value': 'hill'},
+                                {'label': '3-Parameter Logistic', 'value': '3pl'},
+                                {'label': '5-Parameter Logistic', 'value': '5pl'},
+                                {'label': 'Exponential', 'value': 'exp'},
+                            ],
+                            value='hill',
+                            clearable=False,
+                            style={'color': 'black'},
+                        ),
+                        dbc.Checkbox(
+                            id="use-best-model",
+                            label="Automatically use best model (by AIC)",
+                            value=False,
+                            className="mt-2"
+                        ),
+                    ], style={'margin': '10px 0 20px 0'}),
+                    
+                    # Model Explanation (full width above sliders and comparison)
                     dbc.Col([
-                        html.Div(id='parameter-sliders'),
-                    ], md=6),
-                    dbc.Col([
-                        html.Div(id='parameter-explanations', style={'margin': '0 0 20px 0'}),
-                    ], md=6),
+                        html.Div(id='model-explanation', style={'margin': '0 0 20px 0'}),
+                    ], width=12), # Takes full width
+                    
+                    # New row structure for sliders and comparison
+                    dbc.Row([
+                        # Left side - Parameter sliders
+                        dbc.Col([
+                            html.Div(id='parameter-sliders', style={'margin': '0 0 20px 0'}),
+                        ], md=6),
+                        
+                        # Right side - Model comparison card
+                        dbc.Col([
+                            html.Div(id='model-comparison', style={'margin': '0 0 20px 0'}),
+                        ], md=6),
+                    ]),
                 ]),
-            ], className="p-4 mb-2", style={'background': 'rgba(14, 47, 68, 0.1)', 'border-radius': '5px'}),
+                id="collapse-parameters",
+                is_open=True,
+            ),
             
             # Tabs for different graph views
             dbc.Tabs([
@@ -249,6 +292,7 @@ def store_uploaded_data(contents, filename):
      Input('excluded-wells', 'data')]
 )
 def update_visualization(data, excluded_wells):
+    print("Rendering plate with excluded wells:", excluded_wells)
     if data is not None:
         df = pd.DataFrame(data)
         if 'Experiment_ID' not in df.columns:
@@ -276,23 +320,57 @@ def update_visualization(data, excluded_wells):
     prevent_initial_call=True
 )
 def toggle_well_exclusion(n_clicks, excluded_wells):
-    # Find which well was clicked
     ctx = dash.callback_context
     if not ctx.triggered:
         return excluded_wells
     
-    # Get the ID of the clicked well
-    clicked_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    well_info = json.loads(clicked_id)
-    well = well_info['well']
+    # Get the triggered input and check if any n_clicks value is actually > 0
+    # This prevents callbacks from firing during initial creation
+    if not any(n > 0 for n in n_clicks if n is not None):
+        return excluded_wells
     
-    # Toggle the well's exclusion status
-    if well in excluded_wells:
-        excluded_wells.remove(well)
+    # Add debugging print statements
+    print("Triggered:", ctx.triggered)
+    print("Current excluded wells:", excluded_wells)
+    
+    # Fix the parsing of the clicked ID
+    triggered_id = ctx.triggered[0]['prop_id']
+    print("Triggered ID:", triggered_id)
+    
+    # Extract the JSON part from the string
+    match = re.search(r'(\{.*\})', triggered_id)
+    if match:
+        json_str = match.group(1)
+        print("Extracted JSON:", json_str)
+        well_info = json.loads(json_str)
+        print("Parsed well info:", well_info)
+        well = well_info['well']
+        print("Selected well:", well)
+        
+        # Toggle the well's exclusion status
+        if well in excluded_wells:
+            excluded_wells.remove(well)
+        else:
+            excluded_wells.append(well)
     else:
-        excluded_wells.append(well)
+        print("No JSON match found in:", triggered_id)
     
+    print("New excluded wells:", excluded_wells)
     return excluded_wells
+
+# Removed reset_excluded_wells callback since button is commented out
+
+# Add this callback to toggle the collapse state
+@callback(
+    Output("collapse-parameters", "is_open"),
+    Output("collapse-button", "children"),
+    Input("collapse-button", "n_clicks"),
+    State("collapse-parameters", "is_open"),
+)
+def toggle_collapse(n_clicks, is_open):
+    if n_clicks:
+        return not is_open, "Show Parameters" if is_open else "Hide Parameters"
+    return is_open, "Hide Parameters"
 
 # Show dose response graphs with fitted curves when button is clicked, wells change, or model changes
 @callback(
@@ -370,11 +448,27 @@ def handle_calculate_button(n_clicks, excluded_wells, model_type, param_values,
         # Store fit results for all treatments
         all_fit_data = curve_fit_data.copy() if curve_fit_data else {}
         
-        # Generate individual graphs - similar to before
+        # Generate individual graphs
         individual_graphs = []
         for treatment in treatments:
             treatment_data = grouped[grouped['Treatment'] == treatment]
             
+            # Fit all models for comparison
+            model_types = ['hill', '3pl', '5pl', 'exp']
+            if treatment not in all_fit_data:
+                all_fit_data[treatment] = {}
+                
+            # Fit all models if this is a fresh calculation (not just parameter adjustment)
+            if not param_slider_changed:
+                for model in model_types:
+                    # Only fit if we don't already have data for this model
+                    if model not in all_fit_data[treatment]:
+                        x_data = treatment_data['Dose_uM'].values
+                        y_data = treatment_data['mean_response'].values
+                        fit_result = fit_dose_response_model(x_data, y_data, model)
+                        all_fit_data[treatment][model] = fit_result
+            
+            # Then continue with the rest of the function using the selected model_type
             # Prepare data for plotting
             x_data = treatment_data['Dose_uM'].values
             y_data = treatment_data['mean_response'].values
@@ -489,12 +583,15 @@ def handle_calculate_button(n_clicks, excluded_wells, model_type, param_values,
                 # Add fit statistics to the graph - positioned at top right
                 r2 = fit_result['r_squared']
                 rmse = fit_result['rmse']
+                aic = fit_result.get('aic', 'N/A')
+                bic = fit_result.get('bic', 'N/A')
+
                 fig.add_annotation(
                     x=0.98,
-                    y=0.98,  # Changed from 0.05 to 0.98 to move to top right
+                    y=0.98,
                     xref="paper",
                     yref="paper",
-                    text=f"R² = {r2:.4f}, RMSE = {rmse:.4f}",
+                    text=f"R² = {r2:.4f}, RMSE = {rmse:.4f}<br>AIC = {aic:.2f}, BIC = {bic:.2f}",
                     showarrow=False,
                     bgcolor="rgba(14, 47, 68, 0.8)",
                     bordercolor="white",
@@ -648,11 +745,23 @@ def fit_dose_response_model(xdata, ydata, model_type, initial_params=None):
         r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
         rmse = np.sqrt(np.mean(residuals**2))
         
+        # Calculate AIC and BIC
+        n = len(ydata_fit)  # number of data points
+        k = len(params)     # number of parameters
+        
+        # For normally distributed errors
+        aic = n * np.log(ss_res/n) + 2*k
+        bic = n * np.log(ss_res/n) + k*np.log(n)
+        
         return {
             'params': params.tolist(),  # Convert to list for JSON serialization
             'model_type': model_type,
             'r_squared': r_squared,
             'rmse': rmse,
+            'aic': aic,
+            'bic': bic,
+            'num_params': k,
+            'num_points': n,
             'success': True,
         }
     except Exception as e:
@@ -662,6 +771,8 @@ def fit_dose_response_model(xdata, ydata, model_type, initial_params=None):
             'model_type': model_type,
             'r_squared': 0,
             'rmse': float('inf'),
+            'aic': float('inf'),
+            'bic': float('inf'),
             'success': False,
             'error': str(e)
         }
@@ -690,7 +801,8 @@ def create_slider(param_name, display_name, value, min_val, max_val, step=0.01):
 # Update parameter controls for all model types
 @callback(
     [Output('parameter-sliders', 'children'),
-     Output('parameter-explanations', 'children')],
+     Output('model-comparison', 'children'),
+     Output('model-explanation', 'children')],
     [Input('model-dropdown', 'value'),
      Input('curve-fit-data', 'data'),
      Input('active-tab', 'data'),
@@ -698,7 +810,6 @@ def create_slider(param_name, display_name, value, min_val, max_val, step=0.01):
     prevent_initial_call=True
 )
 def update_parameter_controls(model_type, curve_fit_data, active_tab, selected_treatments):
-    """Create sliders based on the selected model and fitted parameters"""
     # Choose which treatment to use for parameters based on the active tab
     target_treatment = None
     
@@ -713,7 +824,14 @@ def update_parameter_controls(model_type, curve_fit_data, active_tab, selected_t
                     target_treatment = treatment
                     break
     
-    # If we found a treatment with parameters, use them
+    # Get model comparison card if treatment data exists
+    model_comparison_card = html.Div()
+    model_explanation_card = get_model_explanation(model_type)
+    
+    if target_treatment and curve_fit_data and target_treatment in curve_fit_data:
+        model_comparison_card = generate_model_comparison_card(curve_fit_data, target_treatment)
+    
+    # If we found a treatment with parameters, use them for sliders
     if target_treatment and curve_fit_data and target_treatment in curve_fit_data and \
        model_type in curve_fit_data[target_treatment] and curve_fit_data[target_treatment][model_type]['success']:
         
@@ -757,14 +875,17 @@ def update_parameter_controls(model_type, curve_fit_data, active_tab, selected_t
                 create_slider("c", "Offset", c, c*0.5, c*1.5)
             ]
         
-        return html.Div([
+        sliders_div = html.Div([
             html.Div(f"Parameters shown for: {target_treatment}", 
                     style={"fontStyle": "italic", "marginBottom": "10px"}),
             html.Div(sliders)
-        ]), parameter_explanations(model_type)
+        ])
+        
+        # Return values matching the updated Output list
+        return sliders_div, model_comparison_card, model_explanation_card
     
-    # If no fit data is available, return default controls
-    return default_parameter_sliders(model_type), parameter_explanations(model_type)
+    # If no fit data is available, return default controls and cards
+    return default_parameter_sliders(model_type), model_comparison_card, model_explanation_card
 
 # Function to generate default sliders
 def default_parameter_sliders(model_type):
@@ -798,88 +919,90 @@ def default_parameter_sliders(model_type):
     return html.Div()
 
 # Function for parameter explanations
-def parameter_explanations(model_type):
+def parameter_explanations(model_type, fit_data=None, treatment=None):
+    # Create base explanations
+    model_explanation = get_model_explanation(model_type)
+    
+    if fit_data and treatment and treatment in fit_data and model_type in fit_data[treatment]:
+        # Add model comparison card first
+        model_comparison = generate_model_comparison_card(fit_data, treatment)
+        
+        # Return just the model comparison and base explanation
+        return html.Div([model_comparison, model_explanation])
+    
+    return html.Div([model_explanation])
+
+def get_model_explanation(model_type):
+    # Original model explanations (without modification)
     if model_type == 'hill':
-        return html.Div([
-            dbc.Card(
-                dbc.CardBody([
-                    html.H4("4-Parameter Logistic Model", className="card-title"),
-                    html.P("Formula: y = Bottom + (Top - Bottom) / (1 + (EC50/x)^Hill)"),
-                    html.Hr(),
-                    html.Ul([
-                        html.Li([html.B("Bottom: "), "Lower asymptote (response at zero dose)"]),
-                        html.Li([html.B("Top: "), "Upper asymptote (maximum response at infinite dose)"]),
-                        html.Li([html.B("EC50: "), "Concentration producing 50% of maximum response"]),
-                        html.Li([html.B("Hill: "), "Slope factor (steepness of the curve)"])
-                    ], style={'text-align': 'left'})
-                ]), 
-                className="mb-3", 
-                style={"background-color": "rgba(14, 47, 68, 0.3)"}
-            )
-        ])
+        return dbc.Card(
+            dbc.CardBody([
+                html.H4("4-Parameter Logistic Model", className="card-title"),
+                html.P("Formula: y = Bottom + (Top - Bottom) / (1 + (EC50/x)^Hill)"),
+                html.Hr(),
+                html.Ul([
+                    html.Li([html.B("Bottom: "), "Lower asymptote (response at zero dose)"]),
+                    html.Li([html.B("Top: "), "Upper asymptote (maximum response at infinite dose)"]),
+                    html.Li([html.B("EC50: "), "Concentration producing 50% of maximum response"]),
+                    html.Li([html.B("Hill: "), "Slope factor (steepness of the curve)"])
+                ], style={'text-align': 'left'})
+            ]), 
+            className="mb-3", 
+            style={"background-color": "rgba(14, 47, 68, 0.3)"}
+        )
     
     elif model_type == '3pl':
-        return html.Div([
-            dbc.Card(
-                dbc.CardBody([
-                    html.H4("3-Parameter Logistic Model", className="card-title"),
-                    html.P("Formula: y = Top / (1 + (EC50/x)^Hill)"),
-                    html.Hr(),
-                    html.P("This model assumes the lower asymptote is fixed at zero."),
-                    html.Ul([
-                        html.Li([html.B("Top: "), "Upper asymptote (maximum response)"]),
-                        html.Li([html.B("EC50: "), "Concentration producing 50% of maximum response"]),
-                        html.Li([html.B("Hill: "), "Slope factor (steepness of the curve)"])
-                    ], style={'text-align': 'left'})
-                ]), 
-                className="mb-3", 
-                style={"background-color": "rgba(14, 47, 68, 0.3)"}
-            )
-        ])
+        return dbc.Card(
+            dbc.CardBody([
+                html.H4("3-Parameter Logistic Model", className="card-title"),
+                html.P("Formula: y = Top / (1 + (EC50/x)^Hill)"),
+                html.Hr(),
+                html.P("This model assumes the lower asymptote is fixed at zero."),
+                html.Ul([
+                    html.Li([html.B("Top: "), "Upper asymptote (maximum response)"]),
+                    html.Li([html.B("EC50: "), "Concentration producing 50% of maximum response"]),
+                    html.Li([html.B("Hill: "), "Slope factor (steepness of the curve)"])
+                ], style={'text-align': 'left'})
+            ]), 
+            className="mb-3", 
+            style={"background-color": "rgba(14, 47, 68, 0.3)"}
+        )
     
     elif model_type == '5pl':
-        return html.Div([
-            dbc.Card(
-                dbc.CardBody([
-                    html.H4("5-Parameter Logistic Model", className="card-title"),
-                    html.P("Formula: y = Bottom + (Top - Bottom) / (1 + (EC50/x)^Hill)^s"),
-                    html.Hr(),
-                    html.Ul([
-                        html.Li([html.B("Bottom: "), "Lower asymptote (response at zero dose)"]),
-                        html.Li([html.B("Top: "), "Upper asymptote (maximum response)"]),
-                        html.Li([html.B("EC50: "), "Concentration producing 50% of maximum response"]),
-                        html.Li([html.B("Hill: "), "Slope factor (steepness of the curve)"]),
-                        html.Li([html.B("s: "), "Asymmetry factor (s=1 makes it symmetric like 4PL)"])
-                    ], style={'text-align': 'left'})
-                ]), 
-                className="mb-3", 
-                style={"background-color": "rgba(14, 47, 68, 0.3)"}
-            )
-        ])
+        return dbc.Card(
+            dbc.CardBody([
+                html.H4("5-Parameter Logistic Model", className="card-title"),
+                html.P("Formula: y = Bottom + (Top - Bottom) / (1 + (EC50/x)^Hill)^s"),
+                html.Hr(),
+                html.Ul([
+                    html.Li([html.B("Bottom: "), "Lower asymptote (response at zero dose)"]),
+                    html.Li([html.B("Top: "), "Upper asymptote (maximum response)"]),
+                    html.Li([html.B("EC50: "), "Concentration producing 50% of maximum response"]),
+                    html.Li([html.B("Hill: "), "Slope factor (steepness of the curve)"]),
+                    html.Li([html.B("s: "), "Asymmetry factor (s=1 makes it symmetric like 4PL)"])
+                ], style={'text-align': 'left'})
+            ]), 
+            className="mb-3", 
+            style={"background-color": "rgba(14, 47, 68, 0.3)"}
+        )
     
     elif model_type == 'exp':
-        return html.Div([
-            dbc.Card(
-                dbc.CardBody([
-                    html.H4("Exponential Model", className="card-title"),
-                    html.P("Formula: y = a * (1 - e^(-b*x)) + c"),
-                    html.Hr(),
-                    html.Ul([
-                        html.Li([html.B("a: "), "Amplitude (height of the curve)"]),
-                        html.Li([html.B("b: "), "Rate constant (how quickly response changes with dose)"]),
-                        html.Li([html.B("c: "), "Offset (vertical shift of the entire curve)"])
-                    ], style={'text-align': 'left'})
-                ]), 
-                className="mb-3", 
-                style={"background-color": "rgba(14, 47, 68, 0.3)"}
-            )
-        ])
+        return dbc.Card(
+            dbc.CardBody([
+                html.H4("Exponential Model", className="card-title"),
+                html.P("Formula: y = a * (1 - e^(-b*x)) + c"),
+                html.Hr(),
+                html.Ul([
+                    html.Li([html.B("a: "), "Amplitude (height of the curve)"]),
+                    html.Li([html.B("b: "), "Rate constant (how quickly response changes with dose)"]),
+                    html.Li([html.B("c: "), "Offset (vertical shift of the entire curve)"])
+                ], style={'text-align': 'left'})
+            ]), 
+            className="mb-3", 
+            style={"background-color": "rgba(14, 47, 68, 0.3)"}
+        )
     
     return html.Div()
-
-def default_parameter_explanations(model_type):
-    # Similar to parameter_explanations but with default explanations
-    return parameter_explanations(model_type)
 
 # Populate treatment selector dropdown when data is available
 @callback(
@@ -1180,12 +1303,15 @@ def create_treatment_graph(treatment_data, treatment, fit_data, model_type):
         # Add fit statistics to the graph - positioned at top right
         r2 = fit_result['r_squared']
         rmse = fit_result['rmse']
+        aic = fit_result.get('aic', 'N/A')
+        bic = fit_result.get('bic', 'N/A')
+
         fig.add_annotation(
             x=0.98,
             y=0.98,
             xref="paper",
             yref="paper",
-            text=f"R² = {r2:.4f}, RMSE = {rmse:.4f}",
+            text=f"R² = {r2:.4f}, RMSE = {rmse:.4f}<br>AIC = {aic:.2f}, BIC = {bic:.2f}",
             showarrow=False,
             bgcolor="rgba(14, 47, 68, 0.8)",
             bordercolor="white",
@@ -1282,6 +1408,121 @@ def create_treatment_param_sliders(treatment, fit_data, model_type):
         ]
     
     return html.Div(sliders)
+
+def get_best_model(fit_data, treatment):
+    """Compare all models for a treatment and determine best fit based on AIC/BIC"""
+    if not fit_data or treatment not in fit_data:
+        return None
+    
+    models = ['hill', '3pl', '5pl', 'exp']
+    comparison = []
+    
+    for model in models:
+        if model in fit_data[treatment] and fit_data[treatment][model]['success']:
+            result = fit_data[treatment][model]
+            comparison.append({
+                'model': model,
+                'aic': result['aic'],
+                'bic': result['bic'],
+                'r_squared': result['r_squared'],
+                'rmse': result['rmse'],
+                'num_params': result['num_params'],
+                'display_name': {
+                    'hill': '4-Parameter Logistic',
+                    '3pl': '3-Parameter Logistic',
+                    '5pl': '5-Parameter Logistic', 
+                    'exp': 'Exponential'
+                }[model]
+            })
+    
+    # Sort by AIC (lowest is best)
+    comparison_sorted = sorted(comparison, key=lambda x: x['aic'])
+    return comparison_sorted
+
+def generate_model_comparison_card(fit_data, treatment):
+    """Generate a card showing model comparison"""
+    if not fit_data or treatment not in fit_data:
+        return html.Div("No model data available")
+    
+    comparison = get_best_model(fit_data, treatment)
+    if not comparison:
+        return html.Div("No successful model fits available")
+    
+    # Create the comparison table
+    header = html.Tr([
+        html.Th("Model"),
+        html.Th("AIC"),
+        html.Th("BIC"),
+        html.Th("R²"),
+        html.Th("Parameters")
+    ])
+    
+    rows = []
+    best_aic_model = comparison[0]['model']
+    best_bic_model = sorted(comparison, key=lambda x: x['bic'])[0]['model']
+    
+    for model_data in comparison:
+        is_best_aic = model_data['model'] == best_aic_model
+        is_best_bic = model_data['model'] == best_bic_model
+        
+        # Set text color to light green if it's the best model by AIC or BIC
+        style = {}
+        if is_best_aic or is_best_bic:
+            style = {'color': 'lightgreen'}
+        
+        # Create table row with the style attribute applied to the row
+        row = html.Tr([
+            html.Td(model_data['display_name']),
+            html.Td(f"{model_data['aic']:.2f}"),
+            html.Td(f"{model_data['bic']:.2f}"),
+            html.Td(f"{model_data['r_squared']:.4f}"),
+            html.Td(f"{model_data['num_params']}")
+        ], style=style)
+        
+        rows.append(row)
+    
+    table = html.Table([header] + rows, className="table table-sm", style={
+        'width': '100%',
+        'border-collapse': 'collapse',
+        'margin-top': '10px',
+        'color': 'white'
+    })
+    
+    return dbc.Card(
+        dbc.CardBody([
+            html.H4("Model Comparison", className="card-title"),
+            html.Hr(),
+            table,
+            html.Hr(),
+            html.P([
+                html.Strong("Recommendation: "), 
+                "The model with the lowest AIC/BIC provides the best balance between fit quality and model complexity."
+            ])
+        ]),
+        className="mb-3",
+        style={"background-color": "rgba(14, 47, 68, 0.3)"}
+    )
+
+@callback(
+    Output('model-dropdown', 'value'),
+    [Input('use-best-model', 'value'),
+     Input('treatment-selector', 'value')],
+    [State('curve-fit-data', 'data')],
+    prevent_initial_call=True
+)
+def update_to_best_model(use_best, selected_treatments, fit_data):
+    if not use_best or not fit_data or not selected_treatments:
+        return no_update
+    
+    treatment = selected_treatments[0] if selected_treatments else None
+    if not treatment or treatment not in fit_data:
+        return no_update
+    
+    comparison = get_best_model(fit_data, treatment)
+    if comparison:
+        return comparison[0]['model']  # Return best model by AIC
+    
+    return no_update
 
 if __name__ == '__main__':
     app.run_server(debug=True)
