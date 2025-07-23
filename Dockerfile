@@ -16,8 +16,9 @@ RUN pip install --no-cache-dir --user -r requirements.txt
 # Production stage
 FROM python:3.9-slim
 
-# Install runtime dependencies
+# Install runtime dependencies (including curl for health check)
 RUN apt-get update && apt-get install -y \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
@@ -26,11 +27,11 @@ RUN useradd --create-home --shell /bin/bash app
 # Set working directory
 WORKDIR /app
 
-# Copy Python packages from builder stage
-COPY --from=builder /root/.local /home/app/.local
-
-# Copy application code
+# Copy application code first
 COPY --chown=app:app . .
+
+# Copy Python packages from builder stage to the app user's directory
+COPY --from=builder --chown=app:app /root/.local /home/app/.local
 
 # Switch to non-root user
 USER app
