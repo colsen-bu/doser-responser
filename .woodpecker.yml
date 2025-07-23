@@ -9,58 +9,34 @@ steps:
     when:
       - event: [push, pull_request]
 
-  # Build Docker image
-  docker-build:
-    image: plugins/docker
-    settings:
-      registry: 
-        from_secret: docker_registry
-      username:
-        from_secret: docker_username
-      password:
-        from_secret: docker_password
-      repo: ${CI_REPO_OWNER}/doser-responser
-      tags:
-        - latest
-        - ${CI_COMMIT_SHA:0:8}
-      dockerfile: Dockerfile
-      context: .
-    when:
-      - event: push
-      - branch: main
-
-  # Deploy to production using Docker socket
+  # Build and deploy Docker image locally
   deploy:
     image: docker:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     commands:
-      - docker pull ${CI_REPO_OWNER}/doser-responser:latest
+      # Build the Docker image locally using the current workspace
+      - docker build -t doser-responser:latest .
+      # Stop and remove existing container if it exists
       - docker stop doser-responser || true
       - docker rm doser-responser || true
-      - docker run -d --name doser-responser --restart unless-stopped ${CI_REPO_OWNER}/doser-responser:latest
+      # Run the new container
+      - docker run -d --name doser-responser --restart unless-stopped -p 8050:8050 doser-responser:latest
+      # Clean up old images to save space
+      - docker image prune -f
     when:
       - event: push
       - branch: main
 
-  # Notify deployment status
+  # Notify deployment status (optional - remove webhook_url secret requirement)
   notify:
-    image: plugins/webhook
-    settings:
-      urls:
-        from_secret: webhook_url
-      content_type: application/json
-      template: |
-        {
-          "text": "🚀 Doser Responser deployed successfully!\nCommit: {{ .Commit.SHA }}\nBranch: {{ .Commit.Branch }}\nAuthor: {{ .Commit.Author }}"
-        }
+    image: alpine:latest
+    commands:
+      - echo "🚀 Doser Responser deployed successfully!"
+      - echo "Commit: ${CI_COMMIT_SHA}"
+      - echo "Branch: ${CI_COMMIT_BRANCH}"
+      - echo "Author: ${CI_COMMIT_AUTHOR}"
     when:
       - event: push
       - branch: main
       - status: [success]
-
-# Required secrets in Woodpecker:
-# - docker_registry: Docker registry URL
-# - docker_username: Docker registry username  
-# - docker_password: Docker registry password
-# - webhook_url: Optional webhook for notifications

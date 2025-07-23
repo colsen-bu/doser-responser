@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import base64
 import io
+import os
 import plotly.graph_objs as go
 import plotly.express as px
 from dash_bootstrap_templates import load_figure_template
@@ -15,24 +16,133 @@ import json
 from scipy.optimize import curve_fit
 import re
 
-# Load the 'vapor' theme
-load_figure_template('vapor')
+# Load the 'slate' theme
+load_figure_template('slate')
 
-# Define the plate visualization function directly in index.py
-def generate_plate_visualization(experiment_df, excluded_wells=None):
+# Define plate visualization functions for both icon and full views
+def detect_plate_type(experiment_df):
+    """Detect whether this is a 96-well or 384-well plate based on well names"""
+    wells = experiment_df['Well'].unique()
+    
+    # Check for 384-well plate patterns (A1-P24)
+    has_384_wells = any(well[0] in 'IJKLMNOP' for well in wells if len(well) >= 2)
+    max_col = max([int(re.findall(r'\d+', well)[0]) for well in wells if re.findall(r'\d+', well)], default=0)
+    
+    if has_384_wells or max_col > 12:
+        return '384'
+    else:
+        return '96'
+
+def get_plate_dimensions(plate_type):
+    """Get row and column definitions for different plate types"""
+    if plate_type == '384':
+        rows = [chr(ord('A') + i) for i in range(16)]  # A-P
+        cols = [str(i) for i in range(1, 25)]  # 1-24
+        return rows, cols
+    else:  # 96-well
+        rows = ['A','B','C','D','E','F','G','H']
+        cols = [str(i) for i in range(1, 13)]  # 1-12
+        return rows, cols
+
+def generate_plate_icon(experiment_df, experiment_id, excluded_wells=None):
+    """Generate a small icon representation of the plate"""
     if excluded_wells is None:
         excluded_wells = []
-        
-    rows = ['A','B','C','D','E','F','G','H']
-    cols = [str(i) for i in range(1,13)]
+    
+    plate_type = detect_plate_type(experiment_df)
+    total_wells = len(experiment_df)
+    excluded_count = len([w for w in excluded_wells if experiment_df['Well'].str.contains(w.split('_')[0] if '_' in w else w).any()])
+    
+    # Create a small visual representation
+    icon_style = {
+        'width': '120px',
+        'height': '80px',
+        'border': '2px solid #0e2f44',
+        'border-radius': '8px',
+        'background': 'linear-gradient(45deg, #0e2f44 25%, #1a4a5e 25%, #1a4a5e 50%, #0e2f44 50%)',
+        'background-size': '10px 10px',
+        'display': 'flex',
+        'flex-direction': 'column',
+        'justify-content': 'center',
+        'align-items': 'center',
+        'cursor': 'pointer',
+        'margin': '10px',
+        'transition': 'all 0.3s ease',
+        'position': 'relative'
+    }
+    
+    # Add expand indicator using unicode character instead of FontAwesome
+    icon_content = html.Div([
+        html.Div(f"{plate_type}-well", style={
+            'font-weight': 'bold', 
+            'color': 'white', 
+            'font-size': '12px',
+            'margin-bottom': '2px'
+        }),
+        html.Div(f"{total_wells} wells", style={
+            'color': '#aaa', 
+            'font-size': '10px',
+            'margin-bottom': '2px'
+        }),
+        html.Div(f"{excluded_count} excluded", style={
+            'color': '#ff6b6b' if excluded_count > 0 else '#4ecdc4', 
+            'font-size': '9px'
+        }),
+        # Add expand indicator using unicode
+        html.Div("⤢", style={
+            'position': 'absolute',
+            'top': '5px',
+            'right': '8px',
+            'color': '#aaa',
+            'font-size': '12px'
+        })
+    ], 
+    id={'type': 'plate-icon', 'experiment': experiment_id},
+    style=icon_style
+    )
+    
+    return icon_content
+
+def generate_full_plate_visualization(experiment_df, excluded_wells=None, plate_type=None):
+    """Generate the full detailed plate visualization"""
+    if excluded_wells is None:
+        excluded_wells = []
+    
+    if plate_type is None:
+        plate_type = detect_plate_type(experiment_df)
+    
+    rows, cols = get_plate_dimensions(plate_type)
+    
+    # Adjust cell sizes based on plate type
+    if plate_type == '384':
+        cell_width = '35px'
+        cell_height = '30px'
+        font_size = '6px'
+        padding = '1px'
+    else:
+        cell_width = '70px'
+        cell_height = '65px'
+        font_size = '9px'
+        padding = '2px'
     
     # Create header row with column numbers
-    header_row = [html.Th('', style={'text-align': 'center'})] + \
-                 [html.Th(col, style={'text-align': 'center'}) for col in cols]
+    header_row = [html.Th('', style={'text-align': 'center', 'font-size': font_size})]
+    
+    # For 384-well plates, show fewer column labels to avoid clutter
+    if plate_type == '384':
+        # Show every 3rd column number
+        for i, col in enumerate(cols):
+            if i % 3 == 0 or col in ['1', '24']:
+                header_row.append(html.Th(col, style={'text-align': 'center', 'font-size': font_size}))
+            else:
+                header_row.append(html.Th('', style={'text-align': 'center', 'font-size': font_size}))
+    else:
+        header_row.extend([html.Th(col, style={'text-align': 'center', 'font-size': font_size}) for col in cols])
+    
     plate_layout = [html.Tr(header_row)]
 
     for row in rows:
-        row_cells = [html.Th(row, style={'text-align': 'center'})]  # Center row letters
+        row_cells = [html.Th(row, style={'text-align': 'center', 'font-size': font_size})]
         for col in cols:
             well = f'{row}{col}'
             cell_data = experiment_df[experiment_df['Well'] == well]
@@ -44,24 +154,32 @@ def generate_plate_visualization(experiment_df, excluded_wells=None):
                 # Create cell content with text decoration if excluded
                 text_style = {'text-decoration': 'line-through'} if is_excluded else {}
                 
-                # Create a more compact cell content layout
-                cell_content = html.Div([
-                    html.Div(f'{cell_data.iloc[0]["Treatment"]}', 
-                             style={'font-weight': 'bold', 'margin-bottom': '1px', **text_style}),
-                    html.Div(f'{cell_data.iloc[0]["Dose_uM"]}μM', 
-                             style={'font-size': '8px', 'margin-bottom': '1px', **text_style}),
-                    html.Div(f'{cell_data.iloc[0]["Response_Metric"]:.2f}', 
-                             style={'font-size': '8px', **text_style}),
-                ], style={'font-size': '9px', 'text-align': 'center', 'line-height': '1.0'})
+                if plate_type == '384':
+                    # Simplified content for 384-well plates
+                    cell_content = html.Div([
+                        html.Div(f'{cell_data.iloc[0]["Treatment"][:3]}', 
+                                style={'font-weight': 'bold', 'margin-bottom': '1px', **text_style}),
+                        html.Div(f'{cell_data.iloc[0]["Response_Metric"]:.1f}', 
+                                style={'font-size': '5px', **text_style}),
+                    ], style={'font-size': font_size, 'text-align': 'center', 'line-height': '1.0'})
+                else:
+                    # Full content for 96-well plates
+                    cell_content = html.Div([
+                        html.Div(f'{cell_data.iloc[0]["Treatment"]}', 
+                                style={'font-weight': 'bold', 'margin-bottom': '1px', **text_style}),
+                        html.Div(f'{cell_data.iloc[0]["Dose_uM"]}μM', 
+                                style={'font-size': '8px', 'margin-bottom': '1px', **text_style}),
+                        html.Div(f'{cell_data.iloc[0]["Response_Metric"]:.2f}', 
+                                style={'font-size': '8px', **text_style}),
+                    ], style={'font-size': font_size, 'text-align': 'center', 'line-height': '1.0'})
                 
-                # Increase cell size to accommodate content better
                 cell_style = {
                     'border': '1px solid black',
-                    'width': '70px',  # Increased width
-                    'height': '65px', # Increased height
+                    'width': cell_width,
+                    'height': cell_height,
                     'background-color': '#0a1d2a' if is_excluded else '#0e2f44',
-                    'cursor': 'pointer',  # Change cursor to indicate clickable
-                    'padding': '2px'   # Add a bit of padding
+                    'cursor': 'pointer',
+                    'padding': padding
                 }
                 
                 # Add a unique ID for this cell to track clicks
@@ -70,8 +188,8 @@ def generate_plate_visualization(experiment_df, excluded_wells=None):
                 cell_content = html.Div()
                 cell_style = {
                     'border': '1px solid black',
-                    'width': '60px',
-                    'height': '60px',
+                    'width': cell_width,
+                    'height': cell_height,
                     'background-color': '#494949',
                 }
                 cell_id = None
@@ -93,17 +211,9 @@ def generate_plate_visualization(experiment_df, excluded_wells=None):
     })
     return table
 
-# Simplified navbar without page navigation
-navbar = dbc.NavbarSimple(
-    brand="Doser Responser",
-    brand_href="/",
-    color="primary",
-    dark=True,
-)
 
 # Create the merged single-page layout
 app.layout = dbc.Container([
-    navbar,
     
     # Stores for data persistence
     dcc.Store(id='shared-data', storage_type='memory'),
@@ -111,6 +221,7 @@ app.layout = dbc.Container([
     dcc.Store(id='excluded-wells', storage_type='memory', data=[]),  # Store for excluded wells
     dcc.Store(id='curve-fit-data', storage_type='memory', data={}),  # Store for curve fitting results
     dcc.Store(id='active-tab', storage_type='memory', data="tab-combined"),
+    dcc.Store(id='expanded-plates', storage_type='memory', data=[]),  # Store for tracking which plates are expanded
     
     # Main content - two column layout
     dbc.Row([
@@ -143,6 +254,37 @@ app.layout = dbc.Container([
                 multiple=False
             ),
             
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button(
+                        'Load Sample Data',
+                        id='load-sample-button',
+                        n_clicks=0,
+                        color='secondary',
+                        size='sm',
+                        style={
+                            'width': '100%',
+                            'margin': '0 auto 5px',
+                            'display': 'block'
+                        }
+                    ),
+                ], width=6),
+                dbc.Col([
+                    dbc.Button(
+                        'Download Sample',
+                        id='download-sample-button',
+                        n_clicks=0,
+                        color='info',
+                        size='sm',
+                        style={
+                            'width': '100%',
+                            'margin': '0 auto 5px',
+                            'display': 'block'
+                        }
+                    ),
+                ], width=6),
+            ], className="mb-2"),
+            
             dbc.Button(
                 'Calculate Dose Response',
                 id='calculate-button',
@@ -174,92 +316,96 @@ app.layout = dbc.Container([
         
         # Right column - Dose Response Curves and Controls
         dbc.Col([
-            html.H1('Dose Response Analysis', style={'textAlign': 'center'}),
-            
-            # Add this new button row with controls
+            # Compact header with controls in a single row
             dbc.Row([
                 dbc.Col([
+                    html.H2('Dose Response Analysis', style={'textAlign': 'left', 'margin': '0'}),
+                ], md=6),
+                dbc.Col([
                     dbc.Button(
-                        "Hide Parameters", 
+                        "Show Controls", 
                         id="collapse-button",
-                        className="mb-3",
                         color="secondary",
+                        size="sm",
                         n_clicks=0,
+                        style={'float': 'right'}
                     ),
-                ], width="auto"),
-            ], justify="end"),
+                ], md=6),
+            ], className="mb-2"),
             
-            # Wrap the parameters section in a Collapse component
-            dbc.Collapse(
+            # Compact controls section - initially collapsed to save space
+            dbc.Collapse([
+                # Model selection in a compact horizontal layout
                 dbc.Row([
-                    # Model dropdown stays at the top
-                    html.Div([
-                        html.Label('Select Curve Model:'),
+                    dbc.Col([
+                        html.Label('Model:', style={'font-weight': 'bold', 'margin-bottom': '5px'}),
                         dcc.Dropdown(
                             id='model-dropdown',
                             options=[
-                                {'label': '4-Parameter Logistic (Hill Equation)', 'value': 'hill'},
-                                {'label': '3-Parameter Logistic', 'value': '3pl'},
-                                {'label': '5-Parameter Logistic', 'value': '5pl'},
+                                {'label': '4PL (Hill)', 'value': 'hill'},
+                                {'label': '3PL', 'value': '3pl'},
+                                {'label': '5PL', 'value': '5pl'},
                                 {'label': 'Exponential', 'value': 'exp'},
                             ],
                             value='hill',
                             clearable=False,
                             style={'color': 'black'},
                         ),
+                    ], md=4),
+                    dbc.Col([
+                        html.Label('Auto-select best:', style={'font-weight': 'bold', 'margin-bottom': '5px'}),
                         dbc.Checkbox(
                             id="use-best-model",
-                            label="Automatically use best model (by AIC)",
+                            label="Use best model (AIC)",
                             value=False,
-                            className="mt-2"
                         ),
-                    ], style={'margin': '10px 0 20px 0'}),
-                    
-                    # Model Explanation (full width above sliders and comparison)
+                    ], md=4),
                     dbc.Col([
-                        html.Div(id='model-explanation', style={'margin': '0 0 20px 0'}),
-                    ], width=12), # Takes full width
-                    
-                    # New row structure for sliders and comparison
-                    dbc.Row([
-                        # Left side - Parameter sliders
-                        dbc.Col([
-                            html.Div(id='parameter-sliders', style={'margin': '0 0 20px 0'}),
-                        ], md=6),
-                        
-                        # Right side - Model comparison card
-                        dbc.Col([
-                            html.Div(id='model-comparison', style={'margin': '0 0 20px 0'}),
-                        ], md=6),
-                    ]),
-                ]),
-                id="collapse-parameters",
-                is_open=True,
-            ),
-            
-            # Tabs for different graph views
-            dbc.Tabs([
-                # Tab 1: Combined graph with multi-drug selection
-                dbc.Tab([
-                    html.Div([
-                        html.Label('Select Treatments to Display:'),
+                        html.Label('Treatments:', style={'font-weight': 'bold', 'margin-bottom': '5px'}),
                         dcc.Dropdown(
                             id='treatment-selector',
                             multi=True,
-                            style={'margin-bottom': '20px'}
+                            placeholder="Select treatments...",
+                            style={'color': 'black'}
                         ),
-                        html.Div(id='combined-dose-response-graph')
-                    ], className="p-4"),
-                ], label="Combined View", tab_id="tab-combined"),
+                    ], md=4),
+                ], className="mb-3"),
                 
-                # Tab 2: Individual graphs with separate controls
-                dbc.Tab([
-                    html.Div([
-                        # Individual graphs area (sliders moved to common area above)
-                        html.Div(id='dose-response-graphs'),
-                    ], className="p-4"),
-                ], label="Individual Graphs", tab_id="tab-individual"),
-            ], id="analysis-tabs", active_tab="tab-combined"),
+                # Expandable advanced controls
+                dbc.Accordion([
+                    dbc.AccordionItem([
+                        # Parameter sliders in a more compact layout
+                        html.Div(id='parameter-sliders'),
+                    ], title="Parameter Controls", item_id="params"),
+                    
+                    dbc.AccordionItem([
+                        # Model explanation
+                        html.Div(id='model-explanation'),
+                    ], title="Model Information", item_id="info"),
+                    
+                    dbc.AccordionItem([
+                        # Model comparison
+                        html.Div(id='model-comparison'),
+                    ], title="Model Comparison", item_id="comparison"),
+                ], id="advanced-controls", start_collapsed=True, className="mb-3"),
+                
+            ], id="collapse-parameters", is_open=False, className="mb-3"),
+            
+            # Main graph area - now takes up most of the space
+            html.Div([
+                # Tabs for different graph views - made more compact
+                dbc.Tabs([
+                    # Tab 1: Combined graph
+                    dbc.Tab([
+                        html.Div(id='combined-dose-response-graph')
+                    ], label="Combined View", tab_id="tab-combined"),
+                    
+                    # Tab 2: Individual graphs
+                    dbc.Tab([
+                        html.Div(id='dose-response-graphs')
+                    ], label="Individual Graphs", tab_id="tab-individual"),
+                ], id="analysis-tabs", active_tab="tab-combined", className="mb-2"),
+            ], style={'height': '70vh', 'overflow': 'auto'}),  # Fixed height with scroll if needed
             
             # Fit statistics (hidden)
             html.Div(id='fit-statistics', style={'display': 'none'}),
@@ -267,15 +413,41 @@ app.layout = dbc.Container([
     ]),
 ], fluid=True)
 
+# Add download component for sample data
+app.layout.children.append(dcc.Download(id="download-sample-csv"))
+
 # Handle file upload and store data
 @callback(
     Output('shared-data', 'data'),
-    Input('upload-data', 'contents'),
+    [Input('upload-data', 'contents'),
+     Input('load-sample-button', 'n_clicks')],
     State('upload-data', 'filename'),
     prevent_initial_call=True
 )
-def store_uploaded_data(contents, filename):
-    if contents is not None:
+def store_uploaded_data(contents, load_sample_clicks, filename):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return no_update
+    
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+    
+    if trigger == 'load-sample-button' and load_sample_clicks > 0:
+        # Load sample data
+        try:
+            # Get the directory of the current file (dash_app)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # Go up one level to the project root
+            project_root = os.path.dirname(current_dir)
+            sample_file_path = os.path.join(project_root, 'sample_data.csv')
+            
+            df = pd.read_csv(sample_file_path)
+            return df.to_dict('records')
+        except Exception as e:
+            print(f"Error loading sample data: {e}")
+            return no_update
+    
+    elif trigger == 'upload-data' and contents is not None:
+        # Handle regular file upload
         content_type, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
         try:
@@ -283,33 +455,103 @@ def store_uploaded_data(contents, filename):
             return df.to_dict('records')
         except Exception as e:
             return no_update
+    
+    return no_update
+
+# Handle sample data download
+@callback(
+    Output("download-sample-csv", "data"),
+    Input("download-sample-button", "n_clicks"),
+    prevent_initial_call=True,
+)
+def download_sample_data(n_clicks):
+    if n_clicks:
+        # Get the path to the sample data file
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_dir)
+        sample_file_path = os.path.join(project_root, 'sample_data.csv')
+        
+        # Return the file for download
+        return dcc.send_file(sample_file_path, filename="sample_data.csv")
     return no_update
 
 # Display visualization whenever data changes or excluded wells change
 @callback(
     Output('output-data-upload', 'children'),
     [Input('shared-data', 'data'),
-     Input('excluded-wells', 'data')]
+     Input('excluded-wells', 'data'),
+     Input('expanded-plates', 'data')]
 )
-def update_visualization(data, excluded_wells):
+def update_visualization(data, excluded_wells, expanded_plates):
     print("Rendering plate with excluded wells:", excluded_wells)
+    print("Expanded plates:", expanded_plates)
+    
     if data is not None:
         df = pd.DataFrame(data)
         if 'Experiment_ID' not in df.columns:
             return html.Div("CSV file must contain an 'Experiment_ID' column")
             
         experiment_ids = df['Experiment_ID'].unique()
-        display_visualizations = []
+        
+        # Create plate icons container
+        plate_icons = []
+        expanded_plates_content = []
         
         for experiment_id in experiment_ids:
             experiment_df = df[df['Experiment_ID'] == experiment_id]
-            plate_visual = generate_plate_visualization(experiment_df, excluded_wells)
-            display_visualizations.append(html.Div([
-                html.H3(f'Experiment ID: {experiment_id}'),
-                plate_visual
-            ], style={'margin-bottom': '40px'}))
+            plate_type = detect_plate_type(experiment_df)
             
-        return display_visualizations
+            # Always show the icon
+            plate_icon = generate_plate_icon(experiment_df, experiment_id, excluded_wells)
+            plate_icons.append(plate_icon)
+            
+            # Show expanded view if this plate is expanded
+            if experiment_id in expanded_plates:
+                full_plate = generate_full_plate_visualization(experiment_df, excluded_wells, plate_type)
+                expanded_plate_content = html.Div([
+                    html.Div([
+                        html.H4(f'Experiment ID: {experiment_id}', style={'display': 'inline-block'}),
+                        html.Span(f' ({plate_type}-well plate)', style={
+                            'color': '#aaa', 
+                            'font-size': '14px', 
+                            'margin-left': '10px'
+                        }),
+                        dbc.Button(
+                            "Collapse", 
+                            id={'type': 'collapse-plate-btn', 'experiment': experiment_id},
+                            color="secondary", 
+                            size="sm", 
+                            style={'float': 'right'}
+                        )
+                    ]),
+                    html.Hr(),
+                    full_plate
+                ], style={
+                    'border': '2px solid #4ecdc4',
+                    'border-radius': '8px',
+                    'padding': '15px',
+                    'margin': '10px 0',
+                    'background-color': 'rgba(14, 47, 68, 0.1)'
+                })
+                expanded_plates_content.append(expanded_plate_content)
+        
+        # Return both icon view and expanded plates
+        return html.Div([
+            html.Div([
+                html.H3('Plate Overview', style={'textAlign': 'center', 'margin-bottom': '20px'}),
+                html.P('Click on plate icons to expand and interact with wells', 
+                      style={'textAlign': 'center', 'fontStyle': 'italic', 'color': '#aaa'}),
+                html.Div(plate_icons, style={
+                    'display': 'flex',
+                    'flex-wrap': 'wrap',
+                    'justify-content': 'center',
+                    'gap': '10px',
+                    'margin': '20px 0'
+                })
+            ]),
+            html.Div(expanded_plates_content)
+        ])
+    
     return html.Div("Upload a CSV file to see plate visualizations")
 
 # Handle well clicks to toggle exclusion
@@ -358,6 +600,45 @@ def toggle_well_exclusion(n_clicks, excluded_wells):
     print("New excluded wells:", excluded_wells)
     return excluded_wells
 
+# Handle plate icon clicks to expand/collapse plates
+@callback(
+    Output('expanded-plates', 'data'),
+    [Input({'type': 'plate-icon', 'experiment': ALL}, 'n_clicks'),
+     Input({'type': 'collapse-plate-btn', 'experiment': ALL}, 'n_clicks')],
+    State('expanded-plates', 'data'),
+    prevent_initial_call=True
+)
+def toggle_plate_expansion(icon_clicks, collapse_clicks, expanded_plates):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return expanded_plates
+    
+    # Get the triggered input
+    triggered_id = ctx.triggered[0]['prop_id']
+    print("Plate expansion triggered:", triggered_id)
+    
+    # Extract the JSON part from the string
+    match = re.search(r'(\{.*\})', triggered_id)
+    if match:
+        json_str = match.group(1)
+        button_info = json.loads(json_str)
+        experiment_id = button_info['experiment']
+        button_type = button_info['type']
+        
+        print(f"Button type: {button_type}, Experiment: {experiment_id}")
+        
+        if button_type == 'plate-icon':
+            # Expand the plate
+            if experiment_id not in expanded_plates:
+                expanded_plates.append(experiment_id)
+        elif button_type == 'collapse-plate-btn':
+            # Collapse the plate
+            if experiment_id in expanded_plates:
+                expanded_plates.remove(experiment_id)
+    
+    print("New expanded plates:", expanded_plates)
+    return expanded_plates
+
 # Add this callback to toggle the collapse state
 @callback(
     Output("collapse-parameters", "is_open"),
@@ -367,8 +648,8 @@ def toggle_well_exclusion(n_clicks, excluded_wells):
 )
 def toggle_collapse(n_clicks, is_open):
     if n_clicks:
-        return not is_open, "Show Parameters" if is_open else "Hide Parameters"
-    return is_open, "Hide Parameters"
+        return not is_open, "Hide Controls" if not is_open else "Show Controls"
+    return is_open, "Show Controls"
 
 # Show dose response graphs with fitted curves when button is clicked, wells change, or model changes
 @callback(
@@ -621,7 +902,7 @@ def handle_calculate_button(n_clicks, excluded_wells, model_type, param_values,
                     tickvals=tick_vals,
                     ticktext=tick_text,
                 ),
-                template='vapor',
+                template='slate',
                 legend=dict(
                     orientation="h",
                     yanchor="bottom",
@@ -777,24 +1058,28 @@ def fit_dose_response_model(xdata, ydata, model_type, initial_params=None):
 
 # Create a helper function for consistent slider creation
 def create_slider(param_name, display_name, value, min_val, max_val, step=0.01):
-    # Create evenly distributed marks
-    mark_count = 5
+    # Create fewer marks for compact display
+    mark_count = 3
     mark_values = np.linspace(min_val, max_val, mark_count)
-    marks = {float(val): f"{val:.2f}" for val in mark_values}
+    marks = {float(mark_values[0]): f"{mark_values[0]:.2f}", 
+             float(mark_values[-1]): f"{mark_values[-1]:.2f}"}
     
-    return html.Div([
-        html.Label(f"{display_name}:", 
-                   style={'font-weight': 'bold', 'margin-bottom': '5px'}),
-        dcc.Slider(
-            id={'type': 'param-slider', 'param': param_name},
-            min=min_val,
-            max=max_val,
-            value=value,
-            marks=marks,
-            step=step,
-            tooltip={"placement": "bottom", "always_visible": True}
-        )
-    ], style={'margin': '20px 0', 'padding': '10px', 'background': 'rgba(14, 47, 68, 0.2)', 'border-radius': '5px'})
+    return dbc.Row([
+        dbc.Col([
+            html.Label(f"{display_name}:", style={'font-weight': 'bold', 'margin-bottom': '2px', 'font-size': '12px'}),
+        ], width=3),
+        dbc.Col([
+            dcc.Slider(
+                id={'type': 'param-slider', 'param': param_name},
+                min=min_val,
+                max=max_val,
+                value=value,
+                marks=marks,
+                step=step,
+                tooltip={"placement": "bottom", "always_visible": True}
+            )
+        ], width=9),
+    ], className="mb-2")
 
 # Update parameter controls for all model types
 @callback(
@@ -841,41 +1126,41 @@ def update_parameter_controls(model_type, curve_fit_data, active_tab, selected_t
         if model_type == 'hill' and len(fit_params) >= 4:
             bottom, top, ec50, hill = fit_params
             sliders = [
-                create_slider("bottom", "Bottom Asymptote", bottom, bottom*0.5, bottom*1.5),
-                create_slider("top", "Top Asymptote", top, top*0.5, top*1.5),
+                create_slider("bottom", "Bottom", bottom, bottom*0.5, bottom*1.5),
+                create_slider("top", "Top", top, top*0.5, top*1.5),
                 create_slider("ec50", "EC50", ec50, ec50*0.1, ec50*10),
-                create_slider("hill", "Hill Slope", hill, max(0.1, hill*0.5), hill*1.5)
+                create_slider("hill", "Hill", hill, max(0.1, hill*0.5), hill*1.5)
             ]
             
         elif model_type == '3pl' and len(fit_params) >= 3:
             top, ec50, hill = fit_params
             sliders = [
-                create_slider("top", "Top Asymptote", top, top*0.5, top*1.5),
+                create_slider("top", "Top", top, top*0.5, top*1.5),
                 create_slider("ec50", "EC50", ec50, ec50*0.1, ec50*10),
-                create_slider("hill", "Hill Slope", hill, max(0.1, hill*0.5), hill*1.5)
+                create_slider("hill", "Hill", hill, max(0.1, hill*0.5), hill*1.5)
             ]
             
         elif model_type == '5pl' and len(fit_params) >= 5:
             bottom, top, ec50, hill, s = fit_params
             sliders = [
-                create_slider("bottom", "Bottom Asymptote", bottom, bottom*0.5, bottom*1.5),
-                create_slider("top", "Top Asymptote", top, top*0.5, top*1.5),
+                create_slider("bottom", "Bottom", bottom, bottom*0.5, bottom*1.5),
+                create_slider("top", "Top", top, top*0.5, top*1.5),
                 create_slider("ec50", "EC50", ec50, ec50*0.1, ec50*10),
-                create_slider("hill", "Hill Slope", hill, max(0.1, hill*0.5), hill*1.5),
-                create_slider("s", "Asymmetry Factor", s, max(0.1, s*0.5), s*2)
+                create_slider("hill", "Hill", hill, max(0.1, hill*0.5), hill*1.5),
+                create_slider("s", "Asymmetry", s, max(0.1, s*0.5), s*2)
             ]
             
         elif model_type == 'exp' and len(fit_params) >= 3:
             a, b, c = fit_params
             sliders = [
                 create_slider("a", "Amplitude", a, a*0.5, a*1.5),
-                create_slider("b", "Rate Constant", b, b*0.1, b*10),
+                create_slider("b", "Rate", b, b*0.1, b*10),
                 create_slider("c", "Offset", c, c*0.5, c*1.5)
             ]
         
         sliders_div = html.Div([
-            html.Div(f"Parameters shown for: {target_treatment}", 
-                    style={"fontStyle": "italic", "marginBottom": "10px"}),
+            html.Div(f"Parameters for: {target_treatment}", 
+                    style={"fontStyle": "italic", "marginBottom": "10px", "fontSize": "12px"}),
             html.Div(sliders)
         ])
         
@@ -889,29 +1174,29 @@ def update_parameter_controls(model_type, curve_fit_data, active_tab, selected_t
 def default_parameter_sliders(model_type):
     if model_type == 'hill':
         return html.Div([
-            create_slider("bottom", "Bottom Asymptote", 0, 0, 100),
-            create_slider("top", "Top Asymptote", 100, 1, 200),
+            create_slider("bottom", "Bottom", 0, 0, 100),
+            create_slider("top", "Top", 100, 1, 200),
             create_slider("ec50", "EC50", 1, 0.001, 100),
-            create_slider("hill", "Hill Slope", 1, 0.1, 5)
+            create_slider("hill", "Hill", 1, 0.1, 5)
         ])
     elif model_type == '3pl':
         return html.Div([
-            create_slider("top", "Top Asymptote", 100, 1, 200),
+            create_slider("top", "Top", 100, 1, 200),
             create_slider("ec50", "EC50", 1, 0.001, 100),
-            create_slider("hill", "Hill Slope", 1, 0.1, 5)
+            create_slider("hill", "Hill", 1, 0.1, 5)
         ])
     elif model_type == '5pl':
         return html.Div([
-            create_slider("bottom", "Bottom Asymptote", 0, 0, 100),
-            create_slider("top", "Top Asymptote", 100, 1, 200),
+            create_slider("bottom", "Bottom", 0, 0, 100),
+            create_slider("top", "Top", 100, 1, 200),
             create_slider("ec50", "EC50", 1, 0.001, 100),
-            create_slider("hill", "Hill Slope", 1, 0.1, 5),
-            create_slider("s", "Asymmetry Factor", 1, 0.1, 5)
+            create_slider("hill", "Hill", 1, 0.1, 5),
+            create_slider("s", "Asymmetry", 1, 0.1, 5)
         ])
     elif model_type == 'exp':
         return html.Div([
             create_slider("a", "Amplitude", 100, 1, 200),
-            create_slider("b", "Rate Constant", 0.1, 0.001, 1),
+            create_slider("b", "Rate", 0.1, 0.001, 1),
             create_slider("c", "Offset", 0, -50, 50)
         ])
     return html.Div()
@@ -931,72 +1216,64 @@ def parameter_explanations(model_type, fit_data=None, treatment=None):
     return html.Div([model_explanation])
 
 def get_model_explanation(model_type):
-    # Original model explanations (without modification)
+    # Compact model explanations
     if model_type == 'hill':
         return dbc.Card(
             dbc.CardBody([
-                html.H4("4-Parameter Logistic Model", className="card-title"),
-                html.P("Formula: y = Bottom + (Top - Bottom) / (1 + (EC50/x)^Hill)"),
-                html.Hr(),
+                html.H5("4-Parameter Logistic (Hill)", className="card-title"),
+                html.P("y = Bottom + (Top - Bottom) / (1 + (EC50/x)^Hill)", 
+                       style={'font-family': 'monospace', 'font-size': '12px'}),
                 html.Ul([
-                    html.Li([html.B("Bottom: "), "Lower asymptote (response at zero dose)"]),
-                    html.Li([html.B("Top: "), "Upper asymptote (maximum response at infinite dose)"]),
-                    html.Li([html.B("EC50: "), "Concentration producing 50% of maximum response"]),
-                    html.Li([html.B("Hill: "), "Slope factor (steepness of the curve)"])
-                ], style={'text-align': 'left'})
-            ]), 
-            className="mb-3", 
+                    html.Li("Bottom: Lower asymptote"),
+                    html.Li("Top: Upper asymptote"), 
+                    html.Li("EC50: Half-maximal concentration"),
+                    html.Li("Hill: Slope factor")
+                ], style={'font-size': '12px', 'margin': '0'})
+            ], style={'padding': '10px'}), 
             style={"background-color": "rgba(14, 47, 68, 0.3)"}
         )
     
     elif model_type == '3pl':
         return dbc.Card(
             dbc.CardBody([
-                html.H4("3-Parameter Logistic Model", className="card-title"),
-                html.P("Formula: y = Top / (1 + (EC50/x)^Hill)"),
-                html.Hr(),
-                html.P("This model assumes the lower asymptote is fixed at zero."),
+                html.H5("3-Parameter Logistic", className="card-title"),
+                html.P("y = Top / (1 + (EC50/x)^Hill)", 
+                       style={'font-family': 'monospace', 'font-size': '12px'}),
+                html.P("Lower asymptote fixed at zero.", style={'font-size': '12px', 'margin': '5px 0'}),
                 html.Ul([
-                    html.Li([html.B("Top: "), "Upper asymptote (maximum response)"]),
-                    html.Li([html.B("EC50: "), "Concentration producing 50% of maximum response"]),
-                    html.Li([html.B("Hill: "), "Slope factor (steepness of the curve)"])
-                ], style={'text-align': 'left'})
-            ]), 
-            className="mb-3", 
+                    html.Li("Top: Upper asymptote"),
+                    html.Li("EC50: Half-maximal concentration"),
+                    html.Li("Hill: Slope factor")
+                ], style={'font-size': '12px', 'margin': '0'})
+            ], style={'padding': '10px'}), 
             style={"background-color": "rgba(14, 47, 68, 0.3)"}
         )
     
     elif model_type == '5pl':
         return dbc.Card(
             dbc.CardBody([
-                html.H4("5-Parameter Logistic Model", className="card-title"),
-                html.P("Formula: y = Bottom + (Top - Bottom) / (1 + (EC50/x)^Hill)^s"),
-                html.Hr(),
+                html.H5("5-Parameter Logistic", className="card-title"),
+                html.P("y = Bottom + (Top - Bottom) / (1 + (EC50/x)^Hill)^s", 
+                       style={'font-family': 'monospace', 'font-size': '12px'}),
                 html.Ul([
-                    html.Li([html.B("Bottom: "), "Lower asymptote (response at zero dose)"]),
-                    html.Li([html.B("Top: "), "Upper asymptote (maximum response)"]),
-                    html.Li([html.B("EC50: "), "Concentration producing 50% of maximum response"]),
-                    html.Li([html.B("Hill: "), "Slope factor (steepness of the curve)"]),
-                    html.Li([html.B("s: "), "Asymmetry factor (s=1 makes it symmetric like 4PL)"])
-                ], style={'text-align': 'left'})
-            ]), 
-            className="mb-3", 
+                    html.Li("s: Asymmetry factor (s=1 → 4PL)")
+                ], style={'font-size': '12px', 'margin': '0'})
+            ], style={'padding': '10px'}), 
             style={"background-color": "rgba(14, 47, 68, 0.3)"}
         )
     
     elif model_type == 'exp':
         return dbc.Card(
             dbc.CardBody([
-                html.H4("Exponential Model", className="card-title"),
-                html.P("Formula: y = a * (1 - e^(-b*x)) + c"),
-                html.Hr(),
+                html.H5("Exponential Model", className="card-title"),
+                html.P("y = a * (1 - e^(-b*x)) + c", 
+                       style={'font-family': 'monospace', 'font-size': '12px'}),
                 html.Ul([
-                    html.Li([html.B("a: "), "Amplitude (height of the curve)"]),
-                    html.Li([html.B("b: "), "Rate constant (how quickly response changes with dose)"]),
-                    html.Li([html.B("c: "), "Offset (vertical shift of the entire curve)"])
-                ], style={'text-align': 'left'})
-            ]), 
-            className="mb-3", 
+                    html.Li("a: Amplitude"),
+                    html.Li("b: Rate constant"),
+                    html.Li("c: Offset")
+                ], style={'font-size': '12px', 'margin': '0'})
+            ], style={'padding': '10px'}), 
             style={"background-color": "rgba(14, 47, 68, 0.3)"}
         )
     
@@ -1179,7 +1456,7 @@ def generate_combined_graph(grouped_data, selected_treatments, fit_data, model_t
             tickvals=tick_vals,
             ticktext=tick_text,
         ),
-        template='vapor',
+        template='slate',
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -1342,7 +1619,7 @@ def create_treatment_graph(treatment_data, treatment, fit_data, model_type):
             tickvals=tick_vals,
             ticktext=tick_text,
         ),
-        template='vapor',
+        template='slate',
         legend=dict(
             orientation="h",
             yanchor="bottom",
