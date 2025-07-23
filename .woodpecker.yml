@@ -15,14 +15,13 @@ steps:
       - .:/woodpecker/src/github.com/colsen-bu/doser-responser
     working_dir: /woodpecker/src/github.com/colsen-bu/doser-responser
     commands:
-      - echo "🛑 Stopping previous containers..."
       - docker-compose down || echo "No running containers"
-      - echo "🔨 Building and deploying containers..."
       - docker-compose up -d --build
       - docker image prune -f
     when:
       - event: push
       - branch: main
+
 
   notify:
     image: alpine:latest
