@@ -27,8 +27,13 @@ RUN useradd --create-home --shell /bin/bash app
 # Set working directory
 WORKDIR /app
 
-# Copy application code first
-COPY --chown=app:app . .
+# Copy application code (excluding sample_data.csv to allow volume mount)
+COPY --chown=app:app dash_app/ ./dash_app/
+COPY --chown=app:app requirements.txt wsgi.py ./
+COPY --chown=app:app README.md LICENSE ./
+
+# Create sample_data.csv as a placeholder file for volume mounting
+RUN touch sample_data.csv && chown app:app sample_data.csv
 
 # Copy Python packages from builder stage to the app user's directory
 COPY --from=builder --chown=app:app /root/.local /home/app/.local
