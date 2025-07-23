@@ -14,7 +14,7 @@ services:
     environment:
       - FLASK_ENV=production
     volumes:
-      - ./sample_data.csv:/app/sample_data.csv
+      - ${PWD}/sample_data.csv:/app/sample_data.csv
     restart: unless-stopped
     networks:
       - doser-network
