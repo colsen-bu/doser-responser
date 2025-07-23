@@ -1,7 +1,7 @@
 version: '3.8'
 
 networks:
-  nginx-proxy:
+  npm_proxy:
     external: true
 
 services:
@@ -9,13 +9,13 @@ services:
     build: .
     container_name: doser-responser
     environment:
-      - FLASK_ENV=development
+      - FLASK_ENV=production
     volumes:
-      # Mount source code for development
-      - ./dash_app:/app/dash_app
+      # Keep sample data for production
+      - ./sample_data.csv:/app/sample_data.csv
     restart: unless-stopped
     networks:
-      - nginx-proxy
+      - npm_proxy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7090/_dash-layout"]
       interval: 30s
