@@ -1,8 +1,9 @@
 version: '3.8'
 
 networks:
-  npm_proxy:
-    external: true
+  doser-network:
+    driver: bridge
+    name: doser-network
 
 services:
   doser-responser:
@@ -11,11 +12,12 @@ services:
     environment:
       - FLASK_ENV=production
     volumes:
-      # Keep sample data for production
       - ./sample_data.csv:/app/sample_data.csv
     restart: unless-stopped
     networks:
-      - npm_proxy
+      - doser-network
+    ports:
+      - "7090:7090"  # Expose port for NPM access
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7090/_dash-layout"]
       interval: 30s
