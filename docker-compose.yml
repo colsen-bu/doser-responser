@@ -13,8 +13,6 @@ services:
     container_name: doser-responser
     environment:
       - FLASK_ENV=production
-    volumes:
-      - ${PWD}/sample_data.csv:/app/sample_data.csv
     restart: unless-stopped
     networks:
       - doser-network

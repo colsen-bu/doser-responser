@@ -27,13 +27,10 @@ RUN useradd --create-home --shell /bin/bash app
 # Set working directory
 WORKDIR /app
 
-# Copy application code (excluding sample_data.csv to allow volume mount)
+# Copy application code INCLUDING sample_data.csv
 COPY --chown=app:app dash_app/ ./dash_app/
 COPY --chown=app:app requirements.txt wsgi.py ./
-COPY --chown=app:app README.md LICENSE ./
-
-# Create sample_data.csv as a placeholder file for volume mounting
-RUN touch sample_data.csv && chown app:app sample_data.csv
+COPY --chown=app:app sample_data.csv ./
 
 # Copy Python packages from builder stage to the app user's directory
 COPY --from=builder --chown=app:app /root/.local /home/app/.local
@@ -47,7 +44,7 @@ ENV PATH=/home/app/.local/bin:$PATH
 # Add the current directory to Python path so imports work correctly
 ENV PYTHONPATH=/app
 
-# Health check
+# Health check using correct endpoint per project conventions
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:7090/_dash-layout || exit 1
 
