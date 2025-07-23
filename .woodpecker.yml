@@ -9,11 +9,9 @@ steps:
       - event: [push, pull_request]
 
   deploy:
-    image: docker/compose:1.29.2
+    image: docker:24-cli
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - .:/woodpecker/src/github.com/colsen-bu/doser-responser
-    working_dir: /woodpecker/src/github.com/colsen-bu/doser-responser
     commands:
       - pwd
       - ls -la
@@ -25,7 +23,6 @@ steps:
     when:
       - event: push
       - branch: main
-
 
   notify:
     image: alpine:latest
