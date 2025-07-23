@@ -3,7 +3,7 @@
 import dash
 from dash import html, dcc, Input, Output, State, callback, no_update, MATCH, ALL
 import dash_bootstrap_components as dbc
-from app import app, server
+from dash_app.app import app, server
 import pandas as pd
 import numpy as np
 import base64

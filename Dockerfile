@@ -39,6 +39,9 @@ USER app
 # Make sure scripts in .local are usable
 ENV PATH=/home/app/.local/bin:$PATH
 
+# Add the current directory to Python path so imports work correctly
+ENV PYTHONPATH=/app
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:7090/_dash-layout || exit 1
