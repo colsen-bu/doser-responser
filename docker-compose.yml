@@ -1,9 +1,11 @@
+version: "3.8"
+
 networks:
   doser-network:
     driver: bridge
     name: doser-network
   npm-shared:
-    external: true  # this refers to the one you created manually
+    external: true
 
 services:
   doser-responser:
@@ -17,6 +19,8 @@ services:
     networks:
       - doser-network
       - npm-shared
+    ports:
+      - "7090:7090"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7090/_dash-layout"]
       interval: 30s

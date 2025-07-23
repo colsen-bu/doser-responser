@@ -1,58 +1,34 @@
-when:
-  - event: [push, tag]
-    branch: [main]
-
 steps:
-  # Build and test Python app
-  - name: build-and-test
+  build:
     image: python:3.9-slim
     commands:
-      - apt-get update && apt-get install -y build-essential curl
+      - apt-get update && apt-get install -y build-essential
       - pip install -r requirements.txt
-      - python -c "import dash_app.index; print('✅ Import successful')"
+      - python -c "import dash_app.index; print('Import successful')"
+    when:
+      - event: [push, pull_request]
 
-  # Deploy using Docker Compose with host Docker
-  - name: deploy
-    image: docker:24-cli
+  deploy:
+    image: docker/compose:1.29.2
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - .:/woodpecker/src/github.com/colsen-bu/doser-responser
+    working_dir: /woodpecker/src/github.com/colsen-bu/doser-responser
     commands:
-      - echo "📦 Installing docker-compose..."
-      - apk add --no-cache docker-compose
       - echo "🛑 Stopping previous containers..."
       - docker-compose down || echo "No running containers"
       - echo "🔨 Building and deploying containers..."
       - docker-compose up -d --build
       - docker image prune -f
-      - echo "✅ Doser Responser deployed!"
+    when:
+      - event: push
+      - branch: main
 
-  # Basic post-deploy health check
-  - name: health-check
-    image: docker:24-cli
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+  notify:
+    image: alpine:latest
     commands:
-      - apk add --no-cache docker-compose
-      - echo "📋 docker-compose ps:"
-      - docker-compose ps
-      - echo "📄 Logs (last 20 lines):"
-      - docker-compose logs --tail=20 doser-responser || echo "No logs"
-      - |
-        echo "🔍 Checking container status..."
-        STATUS=$(docker-compose ps -q doser-responser | xargs docker inspect --format '{{.State.Status}}' || echo "not found")
-        echo "Status: $STATUS"
-        if [ "$STATUS" != "running" ]; then
-          echo "❌ Container is not running."
-          exit 1
-        fi
-        echo "✅ Container is running fine."
-
-  # Cleanup (optional)
-  - name: cleanup
-    image: docker:24-cli
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    commands:
-      - docker image prune -f
-      - docker container prune -f
-      - echo "🧹 Cleanup complete."
+      - echo "✅ Doser Responser deployed successfully!"
+    when:
+      - event: push
+      - branch: main
+      - status: [success]
