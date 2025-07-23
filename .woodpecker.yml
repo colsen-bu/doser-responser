@@ -15,6 +15,10 @@ steps:
       - .:/woodpecker/src/github.com/colsen-bu/doser-responser
     working_dir: /woodpecker/src/github.com/colsen-bu/doser-responser
     commands:
+      - pwd
+      - ls -la
+      - cat docker-compose.yml
+      - ls -la sample_data.csv
       - docker-compose down || echo "No running containers"
       - docker-compose up -d --build
       - docker image prune -f
