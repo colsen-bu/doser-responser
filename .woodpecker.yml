@@ -15,9 +15,8 @@ steps:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     commands:
-      # Install docker-compose
-      - apk add --no-cache curl py3-pip python3
-      - pip3 install docker-compose
+      # Install docker-compose using system package manager
+      - apk add --no-cache curl py3-pip python3 docker-compose
       # Stop and remove existing containers
       - docker-compose down || true
       # Build and start with docker-compose
