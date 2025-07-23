@@ -11,10 +11,13 @@ steps:
 
   # Build and deploy with docker-compose
   deploy:
-    image: docker/compose:latest
+    image: docker:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     commands:
+      # Install docker-compose
+      - apk add --no-cache curl py3-pip python3
+      - pip3 install docker-compose
       # Stop and remove existing containers
       - docker-compose down || true
       # Build and start with docker-compose
