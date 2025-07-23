@@ -17,9 +17,6 @@ services:
     networks:
       - doser-network
       - npm-shared
-    ports:
-      # REMOVE this line unless you want public exposure!
-      # - "7090:7090"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7090/_dash-layout"]
       interval: 30s
