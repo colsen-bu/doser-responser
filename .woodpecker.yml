@@ -9,19 +9,17 @@ steps:
     when:
       - event: [push, pull_request]
 
-  # Build and deploy Docker image locally
+  # Build and deploy with docker-compose
   deploy:
-    image: docker:latest
+    image: docker/compose:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     commands:
-      # Build the Docker image locally using the current workspace
-      - docker build -t doser-responser:latest .
-      # Stop and remove existing container if it exists
-      - docker stop doser-responser || true
-      - docker rm doser-responser || true
-      # Run the new container
-      - docker run -d --name doser-responser --restart unless-stopped -p 7090:7090 doser-responser:latest
+      # Stop and remove existing containers
+      - docker-compose down || true
+      # Build and start with docker-compose
+      - docker-compose build --no-cache
+      - docker-compose up -d
       # Clean up old images to save space
       - docker image prune -f
     when:
