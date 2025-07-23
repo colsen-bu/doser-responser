@@ -28,14 +28,12 @@ steps:
       - event: push
       - branch: main
 
-  # Notify deployment status (optional - remove webhook_url secret requirement)
+  # Notify deployment status
   notify:
     image: alpine:latest
     commands:
-      - echo "🚀 Doser Responser deployed successfully!"
-      - echo "Commit: ${CI_COMMIT_SHA}"
-      - echo "Branch: ${CI_COMMIT_BRANCH}"
-      - echo "Author: ${CI_COMMIT_AUTHOR}"
+      - echo "Doser Responser deployed successfully!"
+      - echo "Deployment completed"
     when:
       - event: push
       - branch: main
