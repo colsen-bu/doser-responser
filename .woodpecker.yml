@@ -1,5 +1,5 @@
 steps:
-  # Build and test the application
+  # Step 1: Build and test the application
   build:
     image: python:3.9-slim
     commands:
@@ -7,34 +7,29 @@ steps:
       - pip install -r requirements.txt
       - python -c "import dash_app.index; print('Import successful')"
     when:
-      - event: [push, pull_request]
+      event: [push, pull_request]
 
-  # Build and deploy with docker-compose
+  # Step 2: Build and deploy using Docker Compose
   deploy:
-    image: docker:latest
+    image: docker/compose:1.29.2
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     commands:
-      # Install docker-compose using system package manager
-      - apk add --no-cache curl py3-pip python3 docker-compose
-      # Stop and remove existing containers
       - docker-compose down || true
-      # Build and start with docker-compose
       - docker-compose build --no-cache
       - docker-compose up -d
-      # Clean up old images to save space
       - docker image prune -f
     when:
-      - event: push
-      - branch: main
+      event: push
+      branch: main
 
-  # Notify deployment status
+  # Step 3: Notify success
   notify:
     image: alpine:latest
     commands:
-      - echo "Doser Responser deployed successfully!"
-      - echo "Deployment completed"
+      - echo "✅ Doser Responser deployed successfully!"
+      - echo "🔔 Deployment completed"
     when:
-      - event: push
-      - branch: main
-      - status: [success]
+      event: push
+      branch: main
+      status: [success]
